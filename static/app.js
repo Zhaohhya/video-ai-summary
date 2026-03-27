@@ -5,6 +5,8 @@ let currentFormat = "bullets";
 let currentSummary = "";
 let currentTranscript = "";
 let currentSegments = [];
+let lastLogMessage = "";
+let mouseTrail = null;
 
 function $(id) {
     return document.getElementById(id);
@@ -34,8 +36,7 @@ function showProgress() {
     $("progressSection").style.display = "block";
     $("resultSection").style.display = "none";
     $("errorSection").style.display = "none";
-    const detail = $("progressDetail");
-    if (detail) detail.querySelector("span").textContent = "正在准备任务...";
+    updateProgressText("正在准备任务...");
 }
 
 function showResult(summary, transcript, segments) {
@@ -72,25 +73,28 @@ function stepByStage(stage) {
     if (value.includes("transcrib")) return "step-transcribe";
     if (value.includes("summar")) return "step-summary";
     if (value.includes("complete")) return "step-complete";
+    if (value.includes("fail")) return "step-complete";
     return "step-parse";
 }
 
 function resetSteps() {
-    const ids = ["step-parse", "step-download", "step-audio", "step-transcribe", "step-summary", "step-complete"];
     const wrappers = document.querySelectorAll(".step-wrapper");
     const connectors = document.querySelectorAll(".step-connector");
-    wrappers.forEach(w => w.className = "step-wrapper");
-    connectors.forEach(c => c.className = "step-connector");
-    ids.forEach(id => {
-        const el = $(id);
-        if (el) el.classList.remove("active", "completed");
-    });
+    wrappers.forEach((w) => (w.className = "step-wrapper"));
+    connectors.forEach((c) => (c.className = "step-connector"));
 }
 
 function markStep(stage, done = false) {
-    const order = ["step-parse", "step-download", "step-audio", "step-transcribe", "step-summary", "step-complete"];
+    const order = [
+        "step-parse",
+        "step-download",
+        "step-audio",
+        "step-transcribe",
+        "step-summary",
+        "step-complete",
+    ];
     const current = stepByStage(stage);
-    const idx = order.indexOf(current);
+    const idx = Math.max(0, order.indexOf(current));
     const wrappers = document.querySelectorAll(".step-wrapper");
     const connectors = document.querySelectorAll(".step-connector");
 
@@ -99,9 +103,67 @@ function markStep(stage, done = false) {
         if (i < idx || (done && i <= idx)) w.classList.add("completed");
         if (!done && i === idx) w.classList.add("active", "loading");
     });
+
     connectors.forEach((c, i) => {
-        c.className = i < idx ? "step-connector completed" : (i === idx ? "step-connector active" : "step-connector");
+        if (i < idx) c.className = "step-connector completed";
+        else if (i === idx) c.className = "step-connector active";
+        else c.className = "step-connector";
     });
+}
+
+function clearInfoPanel() {
+    const info = $("infoContent");
+    const log = $("logContent");
+    if (info) info.innerHTML = '<div class="info-empty">正在处理...</div>';
+    if (log) log.innerHTML = '<div class="log-empty">等待开始...</div>';
+    lastLogMessage = "";
+}
+
+function updateInfoPanel(data) {
+    const info = $("infoContent");
+    if (!info) return;
+    const timing = data.timing || {};
+    const token = data.token_usage;
+
+    const items = [];
+    if (timing.download !== undefined) items.push(["下载耗时", `${timing.download}s`]);
+    if (timing.audio_extract !== undefined) items.push(["提取音频", `${timing.audio_extract}s`]);
+    if (timing.transcribe !== undefined) items.push(["转写耗时", `${timing.transcribe}s`]);
+    if (timing.summarize !== undefined) items.push(["总结耗时", `${timing.summarize}s`]);
+    if (timing.total !== undefined) items.push(["总耗时", `${timing.total}s`]);
+    if (token !== null && token !== undefined) items.push(["输出Token", `${token}`]);
+
+    if (items.length === 0) {
+        info.innerHTML = '<div class="info-empty">处理中，暂无统计数据</div>';
+        return;
+    }
+
+    info.innerHTML = items
+        .map(
+            ([k, v]) =>
+                `<div class="info-item"><span class="info-item-label">${escapeHtml(k)}</span><span class="info-item-value">${escapeHtml(v)}</span></div>`
+        )
+        .join("");
+}
+
+function addLogEntry(message, type = "info") {
+    if (!message || message === lastLogMessage) return;
+    lastLogMessage = message;
+
+    const log = $("logContent");
+    if (!log) return;
+    const empty = log.querySelector(".log-empty");
+    if (empty) empty.remove();
+
+    const now = new Date();
+    const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(
+        now.getSeconds()
+    ).padStart(2, "0")}`;
+    const row = document.createElement("div");
+    row.className = `log-entry ${type}`;
+    row.innerHTML = `<span class="log-time">[${t}]</span> ${escapeHtml(message)}`;
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
 }
 
 async function startSummarize() {
@@ -114,8 +176,9 @@ async function startSummarize() {
     hideError();
     resetSteps();
     showProgress();
+    clearInfoPanel();
     setButtonLoading(true);
-    updateProgressText("提交任务中...");
+    addLogEntry("任务已提交，等待后端响应。");
     markStep("preparing");
 
     try {
@@ -127,10 +190,12 @@ async function startSummarize() {
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || "请求失败");
         currentTaskId = data.task_id;
+        addLogEntry(`任务创建成功: ${currentTaskId}`);
         startPolling();
     } catch (err) {
         setButtonLoading(false);
         showError(err.message || "请求失败");
+        addLogEntry(err.message || "请求失败", "error");
     }
 }
 
@@ -144,22 +209,27 @@ function startPolling() {
             if (!resp.ok) throw new Error(data.detail || "状态查询失败");
 
             updateProgressText(data.message || "处理中...");
+            updateInfoPanel(data);
             markStep(data.stage, data.status === "completed");
+            addLogEntry(data.message || data.stage || "状态更新");
 
             if (data.status === "completed") {
                 stopPolling();
                 setButtonLoading(false);
                 showResult(data.result, data.transcript, data.segments);
+                addLogEntry("任务完成。", "success");
                 showToast("处理完成");
             } else if (data.status === "failed") {
                 stopPolling();
                 setButtonLoading(false);
                 showError(data.message || "处理失败");
+                addLogEntry(data.message || "处理失败", "error");
             }
         } catch (err) {
             stopPolling();
             setButtonLoading(false);
             showError(err.message || "轮询失败");
+            addLogEntry(err.message || "轮询失败", "error");
         }
     }, 1200);
 }
@@ -189,7 +259,7 @@ function renderSummary(text) {
     }
 
     if (currentFormat === "timeline" && currentSegments.length > 0) {
-        const lines = currentSegments.map(seg => {
+        const lines = currentSegments.map((seg) => {
             const t = formatTime(seg.start || 0);
             return `<div style="margin:8px 0;"><span class="timestamp">[${t}]</span> ${escapeHtml(seg.text || "")}</div>`;
         });
@@ -198,7 +268,11 @@ function renderSummary(text) {
     }
 
     if (currentFormat === "mindmap") {
-        const rows = safe.split("\n").filter(Boolean).map(row => `└─ ${row}`).join("<br>");
+        const rows = safe
+            .split("\n")
+            .filter(Boolean)
+            .map((row) => `└─ ${row}`)
+            .join("<br>");
         box.innerHTML = `<div class="mindmap"><div class="root">Summary</div>${rows ? "<br>" + rows : ""}</div>`;
         return;
     }
@@ -211,14 +285,14 @@ function renderSummary(text) {
 
 function switchDepth(depth) {
     currentDepth = depth;
-    document.querySelectorAll(".depth-btn").forEach(btn => {
+    document.querySelectorAll(".depth-btn").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.depth === depth);
     });
 }
 
 function switchFormat(format) {
     currentFormat = format;
-    document.querySelectorAll(".format-btn").forEach(btn => {
+    document.querySelectorAll(".format-btn").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.format === format);
     });
     renderSummary(currentSummary);
@@ -249,11 +323,13 @@ function formatSrtTime(seconds) {
 
 function buildSrt(segments) {
     if (!segments || segments.length === 0) return "1\n00:00:00,000 --> 00:00:02,000\n(无字幕)\n";
-    return segments.map((seg, idx) => {
-        const st = formatSrtTime(seg.start || 0);
-        const ed = formatSrtTime(seg.end || (Number(seg.start || 0) + 2));
-        return `${idx + 1}\n${st} --> ${ed}\n${seg.text || ""}\n`;
-    }).join("\n");
+    return segments
+        .map((seg, idx) => {
+            const st = formatSrtTime(seg.start || 0);
+            const ed = formatSrtTime(seg.end || Number(seg.start || 0) + 2);
+            return `${idx + 1}\n${st} --> ${ed}\n${seg.text || ""}\n`;
+        })
+        .join("\n");
 }
 
 function downloadTranscript(type) {
@@ -293,10 +369,90 @@ function toggleTheme() {
     document.documentElement.setAttribute("data-theme", next);
     const icon = document.querySelector("#themeToggle i");
     if (icon) icon.className = next === "dark" ? "fas fa-moon" : "fas fa-sun";
+    if (mouseTrail) mouseTrail.setTheme(next);
+}
+
+class MouseTrail {
+    constructor() {
+        this.canvas = $("mouseCanvas");
+        this.ctx = this.canvas ? this.canvas.getContext("2d") : null;
+        this.particles = [];
+        this.theme = document.documentElement.getAttribute("data-theme") || "dark";
+        this.mouse = { x: 0, y: 0, active: false };
+        this.frame = null;
+
+        if (!this.canvas || !this.ctx) return;
+        this.resize();
+        this.bind();
+        this.animate();
+    }
+
+    setTheme(theme) {
+        this.theme = theme;
+    }
+
+    resize() {
+        if (!this.canvas) return;
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+    }
+
+    bind() {
+        window.addEventListener("resize", () => this.resize());
+        window.addEventListener("mousemove", (e) => {
+            this.mouse.x = e.clientX;
+            this.mouse.y = e.clientY;
+            this.mouse.active = true;
+            this.spawn(e.clientX, e.clientY);
+        });
+        window.addEventListener("mouseleave", () => {
+            this.mouse.active = false;
+        });
+    }
+
+    spawn(x, y) {
+        for (let i = 0; i < 2; i++) {
+            this.particles.push({
+                x,
+                y,
+                vx: (Math.random() - 0.5) * 1.4,
+                vy: (Math.random() - 0.5) * 1.4,
+                life: 1,
+                size: 1.2 + Math.random() * 2.2,
+            });
+        }
+    }
+
+    animate() {
+        if (!this.canvas || !this.ctx) return;
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= 0.025;
+            if (p.life <= 0) {
+                this.particles.splice(i, 1);
+                continue;
+            }
+            const color =
+                this.theme === "light"
+                    ? `rgba(66, 101, 138, ${p.life.toFixed(3)})`
+                    : `rgba(216, 228, 240, ${p.life.toFixed(3)})`;
+            this.ctx.fillStyle = color;
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+        this.frame = requestAnimationFrame(() => this.animate());
+    }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     initTheme();
+    mouseTrail = new MouseTrail();
+
     const themeBtn = $("themeToggle");
     if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
 
