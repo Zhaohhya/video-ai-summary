@@ -1,0 +1,201 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aether Brief</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <canvas id="auroraCanvas"></canvas>
+    <canvas id="meshCanvas"></canvas>
+    <canvas id="mouseCanvas"></canvas>
+
+    <button class="theme-toggle" id="themeToggle" title="切换主题">
+        <i class="fas fa-moon"></i>
+    </button>
+
+    <button class="history-toggle" id="historyToggle" title="历史记录">
+        <i class="fas fa-clock-rotate-left"></i>
+    </button>
+
+    <div class="history-panel" id="historyPanel">
+        <div class="history-header">
+            <h3><i class="fas fa-clock-rotate-left"></i> 处理历史</h3>
+            <button class="history-close" id="historyClose">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="history-controls">
+            <label class="history-toggle-row" for="saveFullHistoryToggle">
+                <input type="checkbox" id="saveFullHistoryToggle">
+                <span>保存完整历史</span>
+            </label>
+            <button class="history-clear-btn" id="clearHistoryBtn">
+                <i class="fas fa-trash-can"></i>
+                <span>清空</span>
+            </button>
+        </div>
+        <div class="history-tip" id="historyTip">默认只保存标题、平台和时间，不保存摘要全文、转写全文和原始链接。</div>
+        <div class="history-list" id="historyList">
+            <div class="history-empty">暂无历史记录</div>
+        </div>
+    </div>
+
+    <button class="info-toggle" id="infoToggle" title="处理信息">
+        <i class="fas fa-sliders"></i>
+    </button>
+
+    <div class="info-panel" id="infoPanel">
+        <div class="info-header">
+            <h3><i class="fas fa-chart-line"></i> 处理信息</h3>
+            <button class="info-close" id="infoClose">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="info-content" id="infoContent">
+            <div class="info-empty">暂无处理信息</div>
+        </div>
+        <div class="info-log">
+            <div class="log-header"><i class="fas fa-list"></i> 实时日志</div>
+            <div class="log-content" id="logContent">
+                <div class="log-empty">等待开始...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast">
+        <i class="fas fa-check-circle"></i>
+        <span id="toastMessage"></span>
+    </div>
+
+    <div class="container">
+        <header>
+            <p class="eyebrow">Aether Intelligence</p>
+            <h1>Aether Brief</h1>
+            <p class="subtitle">输入链接，自动提取音频、转写文本并输出结构化摘要</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <div class="input-wrapper">
+                    <i class="fas fa-link input-icon"></i>
+                    <input type="text" id="videoUrl" placeholder="粘贴视频链接（支持 B站 / 小红书）" />
+                    <button id="summarizeBtn" onclick="startSummarize()">
+                        <i class="fas fa-play"></i>
+                        <span>开始总结</span>
+                    </button>
+                </div>
+
+                <div class="platform-hints">
+                    <span class="hint"><i class="fab fa-youtube"></i> B站</span>
+                    <span class="hint"><i class="fas fa-book"></i> 小红书</span>
+                </div>
+
+                <div class="depth-selector">
+                    <span class="depth-label"><i class="fas fa-sliders-h"></i> 总结深度</span>
+                    <button class="depth-btn active" data-depth="simple" onclick="switchDepth('simple')">
+                        <i class="fas fa-feather"></i> 简洁
+                    </button>
+                    <button class="depth-btn" data-depth="deep" onclick="switchDepth('deep')">
+                        <i class="fas fa-book-open"></i> 深度
+                    </button>
+                </div>
+            </div>
+
+            <div class="progress-section" id="progressSection" style="display: none;">
+                <div class="steps-container">
+                    <div class="step-wrapper" id="step-parse">
+                        <div class="step-icon"><i class="fas fa-link"></i></div>
+                        <div class="step-info"><span class="step-title">解析链接</span></div>
+                    </div>
+                    <div class="step-connector"></div>
+
+                    <div class="step-wrapper" id="step-download">
+                        <div class="step-icon"><i class="fas fa-arrow-down"></i></div>
+                        <div class="step-info"><span class="step-title">下载视频</span></div>
+                    </div>
+                    <div class="step-connector"></div>
+
+                    <div class="step-wrapper" id="step-audio">
+                        <div class="step-icon"><i class="fas fa-wave-square"></i></div>
+                        <div class="step-info"><span class="step-title">提取音频</span></div>
+                    </div>
+                    <div class="step-connector"></div>
+
+                    <div class="step-wrapper" id="step-transcribe">
+                        <div class="step-icon"><i class="fas fa-microphone"></i></div>
+                        <div class="step-info"><span class="step-title">转写文本</span></div>
+                    </div>
+                    <div class="step-connector"></div>
+
+                    <div class="step-wrapper" id="step-summary">
+                        <div class="step-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
+                        <div class="step-info"><span class="step-title">AI总结</span></div>
+                    </div>
+                    <div class="step-connector"></div>
+
+                    <div class="step-wrapper" id="step-complete">
+                        <div class="step-icon"><i class="fas fa-circle-check"></i></div>
+                        <div class="step-info"><span class="step-title">完成</span></div>
+                    </div>
+                </div>
+
+                <div class="progress-detail" id="progressDetail">
+                    <i class="fas fa-circle-notch"></i>
+                    <span>正在准备任务...</span>
+                </div>
+            </div>
+
+            <div class="result-section" id="resultSection" style="display: none;">
+                <div class="result-header">
+                    <h2><i class="fas fa-scroll"></i> 总结结果</h2>
+                    <div class="download-group">
+                        <button class="download-btn" onclick="copyResult()" title="复制摘要">
+                            <i class="fas fa-copy"></i> 复制
+                        </button>
+                        <button class="download-btn" onclick="downloadTranscript('txt')" title="下载TXT字幕">
+                            <i class="fas fa-file-lines"></i> TXT
+                        </button>
+                        <button class="download-btn" onclick="downloadTranscript('srt')" title="下载SRT字幕">
+                            <i class="fas fa-closed-captioning"></i> SRT
+                        </button>
+                    </div>
+                </div>
+
+                <div class="format-selector" id="formatSelector">
+                    <button class="format-btn active" data-format="bullets" onclick="switchFormat('bullets')">
+                        <i class="fas fa-list"></i> 要点
+                    </button>
+                    <button class="format-btn" data-format="narrative" onclick="switchFormat('narrative')">
+                        <i class="fas fa-align-left"></i> 叙事
+                    </button>
+                    <button class="format-btn" data-format="timeline" onclick="switchFormat('timeline')">
+                        <i class="fas fa-clock"></i> 时间线
+                    </button>
+                    <button class="format-btn" data-format="mindmap" onclick="switchFormat('mindmap')">
+                        <i class="fas fa-sitemap"></i> 脑图
+                    </button>
+                </div>
+
+                <div class="result-content" id="resultContent"></div>
+            </div>
+
+            <div class="error-section" id="errorSection" style="display: none;">
+                <div class="error-icon"><i class="fas fa-triangle-exclamation"></i></div>
+                <div class="error-message" id="errorMessage"></div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Powered by <span class="neon-text">Whisper</span> + <span class="neon-text">MiniMax AI</span></p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js?v=20"></script>
+</body>
+</html>

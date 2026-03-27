@@ -1,0 +1,6 @@
+﻿venv/
+outputs/
+runtime_tmp/
+__pycache__/
+*.pyc
+.env.local.bat

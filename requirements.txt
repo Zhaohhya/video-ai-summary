@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+yt-dlp
+openai
+anthropic
+openai-whisper
+python-multipart
+aiofiles

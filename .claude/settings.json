@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where ffmpeg:*)",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" --version)",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" -c \"import sys; print\\(sys.executable\\); print\\(sys.version\\)\")",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\python.exe\" -c \"import conda; print\\(''conda version:'', conda.__version__\\)\")",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\Scripts\\\\conda.exe\" create:*)",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\Scripts\\\\pip.exe\" install:*)",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\envs\\\\video-ai\\\\python.exe\" -c \"import fastapi; import uvicorn; import yt_dlp; import whisper; import anthropic; print\\(''所有核心模块导入成功！''\\)\")",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\envs\\\\video-ai\\\\Scripts\\\\pip.exe\" list:*)",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\envs\\\\video-ai\\\\Scripts\\\\pip.exe\" install:*)",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\envs\\\\video-ai\\\\python.exe\" -c \"from main import app; print\\(''FastAPI app 加载成功!''\\)\")",
+      "Bash(\"C:\\\\ProgramData\\\\anaconda3\\\\envs\\\\video-ai\\\\python.exe\" -c \":*)",
+      "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)"
+    ]
+  }
+}
