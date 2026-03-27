@@ -6,7 +6,8 @@ let currentSummary = "";
 let currentTranscript = "";
 let currentSegments = [];
 let lastLogMessage = "";
-let mouseTrail = null;
+
+let meshEffect = null;
 
 function $(id) {
     return document.getElementById(id);
@@ -18,7 +19,7 @@ function showToast(text) {
     if (!toast || !msg) return;
     msg.textContent = text;
     toast.classList.add("show");
-    setTimeout(() => toast.classList.remove("show"), 2200);
+    setTimeout(() => toast.classList.remove("show"), 2400);
 }
 
 function showError(text) {
@@ -36,24 +37,7 @@ function showProgress() {
     $("progressSection").style.display = "block";
     $("resultSection").style.display = "none";
     $("errorSection").style.display = "none";
-    updateProgressText("正在准备任务...");
-}
-
-function showResult(summary, transcript, segments) {
-    $("progressSection").style.display = "none";
-    $("resultSection").style.display = "block";
-    $("errorSection").style.display = "none";
-    currentSummary = summary || "";
-    currentTranscript = transcript || "";
-    currentSegments = Array.isArray(segments) ? segments : [];
-    renderSummary(currentSummary);
-}
-
-function updateProgressText(text) {
-    const detail = $("progressDetail");
-    if (!detail) return;
-    const span = detail.querySelector("span");
-    if (span) span.textContent = text || "处理中...";
+    updateProgressText("Preparing task...");
 }
 
 function setButtonLoading(loading) {
@@ -61,19 +45,25 @@ function setButtonLoading(loading) {
     if (!btn) return;
     btn.disabled = !!loading;
     btn.innerHTML = loading
-        ? '<i class="fas fa-spinner fa-spin"></i><span>处理中...</span>'
+        ? '<i class="fas fa-spinner fa-spin"></i><span>Processing...</span>'
         : '<i class="fas fa-play"></i><span>开始总结</span>';
 }
 
+function updateProgressText(text) {
+    const detail = $("progressDetail");
+    if (!detail) return;
+    const span = detail.querySelector("span");
+    if (span) span.textContent = text || "Processing...";
+}
+
 function stepByStage(stage) {
-    const value = (stage || "").toLowerCase();
-    if (value.includes("prepar")) return "step-parse";
-    if (value.includes("download")) return "step-download";
-    if (value.includes("extract")) return "step-audio";
-    if (value.includes("transcrib")) return "step-transcribe";
-    if (value.includes("summar")) return "step-summary";
-    if (value.includes("complete")) return "step-complete";
-    if (value.includes("fail")) return "step-complete";
+    const s = (stage || "").toLowerCase();
+    if (s.includes("prepar")) return "step-parse";
+    if (s.includes("download")) return "step-download";
+    if (s.includes("extract")) return "step-audio";
+    if (s.includes("transcrib")) return "step-transcribe";
+    if (s.includes("summar")) return "step-summary";
+    if (s.includes("complete") || s.includes("fail")) return "step-complete";
     return "step-parse";
 }
 
@@ -114,36 +104,9 @@ function markStep(stage, done = false) {
 function clearInfoPanel() {
     const info = $("infoContent");
     const log = $("logContent");
-    if (info) info.innerHTML = '<div class="info-empty">正在处理...</div>';
-    if (log) log.innerHTML = '<div class="log-empty">等待开始...</div>';
+    if (info) info.innerHTML = '<div class="info-empty">Waiting for first status update...</div>';
+    if (log) log.innerHTML = '<div class="log-empty">No logs yet.</div>';
     lastLogMessage = "";
-}
-
-function updateInfoPanel(data) {
-    const info = $("infoContent");
-    if (!info) return;
-    const timing = data.timing || {};
-    const token = data.token_usage;
-
-    const items = [];
-    if (timing.download !== undefined) items.push(["下载耗时", `${timing.download}s`]);
-    if (timing.audio_extract !== undefined) items.push(["提取音频", `${timing.audio_extract}s`]);
-    if (timing.transcribe !== undefined) items.push(["转写耗时", `${timing.transcribe}s`]);
-    if (timing.summarize !== undefined) items.push(["总结耗时", `${timing.summarize}s`]);
-    if (timing.total !== undefined) items.push(["总耗时", `${timing.total}s`]);
-    if (token !== null && token !== undefined) items.push(["输出Token", `${token}`]);
-
-    if (items.length === 0) {
-        info.innerHTML = '<div class="info-empty">处理中，暂无统计数据</div>';
-        return;
-    }
-
-    info.innerHTML = items
-        .map(
-            ([k, v]) =>
-                `<div class="info-item"><span class="info-item-label">${escapeHtml(k)}</span><span class="info-item-value">${escapeHtml(v)}</span></div>`
-        )
-        .join("");
 }
 
 function addLogEntry(message, type = "info") {
@@ -156,20 +119,51 @@ function addLogEntry(message, type = "info") {
     if (empty) empty.remove();
 
     const now = new Date();
-    const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(
         now.getSeconds()
     ).padStart(2, "0")}`;
     const row = document.createElement("div");
     row.className = `log-entry ${type}`;
-    row.innerHTML = `<span class="log-time">[${t}]</span> ${escapeHtml(message)}`;
+    row.innerHTML = `<span class="log-time">[${time}]</span> ${escapeHtml(message)}`;
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
 }
 
+function updateInfoPanel(data) {
+    const info = $("infoContent");
+    if (!info) return;
+    const timing = data.timing || {};
+    const token = data.token_usage;
+    const transcriptChars = (data.transcript || "").length;
+
+    const cards = [];
+    cards.push(["Task Status", String(data.status || "-")]);
+    cards.push(["Current Stage", String(data.stage || "-")]);
+    cards.push(["Progress", `${Number(data.progress || 0)}%`]);
+    if (data.video_title) cards.push(["Video Title", String(data.video_title)]);
+
+    if (timing.download !== undefined) cards.push(["Download", `${timing.download}s`]);
+    if (timing.audio_extract !== undefined) cards.push(["Audio Extract", `${timing.audio_extract}s`]);
+    if (timing.transcribe !== undefined) cards.push(["Transcribe", `${timing.transcribe}s`]);
+    if (timing.summarize !== undefined) cards.push(["Summary", `${timing.summarize}s`]);
+    if (timing.total !== undefined) cards.push(["Total", `${timing.total}s`]);
+
+    if (token !== undefined && token !== null) cards.push(["Output Tokens", String(token)]);
+    if (transcriptChars > 0) cards.push(["Transcript Chars", String(transcriptChars)]);
+
+    info.innerHTML = cards
+        .map(
+            ([k, v]) =>
+                `<div class="info-item"><span class="info-item-label">${escapeHtml(k)}</span><span class="info-item-value">${escapeHtml(v)}</span></div>`
+        )
+        .join("");
+}
+
 async function startSummarize() {
-    const url = ($("videoUrl").value || "").trim();
+    const input = $("videoUrl");
+    const url = (input ? input.value : "").trim();
     if (!url) {
-        showError("请输入视频链接。");
+        showError("Please enter a video URL.");
         return;
     }
 
@@ -178,8 +172,8 @@ async function startSummarize() {
     showProgress();
     clearInfoPanel();
     setButtonLoading(true);
-    addLogEntry("任务已提交，等待后端响应。");
     markStep("preparing");
+    addLogEntry("Task submitted.");
 
     try {
         const resp = await fetch("/api/summarize", {
@@ -188,14 +182,15 @@ async function startSummarize() {
             body: JSON.stringify({ url, depth: currentDepth }),
         });
         const data = await resp.json();
-        if (!resp.ok) throw new Error(data.detail || "请求失败");
+        if (!resp.ok) throw new Error(data.detail || "Request failed");
         currentTaskId = data.task_id;
-        addLogEntry(`任务创建成功: ${currentTaskId}`);
+        addLogEntry(`Task created: ${currentTaskId}`);
         startPolling();
     } catch (err) {
         setButtonLoading(false);
-        showError(err.message || "请求失败");
-        addLogEntry(err.message || "请求失败", "error");
+        const msg = err && err.message ? err.message : "Request failed";
+        showError(msg);
+        addLogEntry(msg, "error");
     }
 }
 
@@ -206,30 +201,31 @@ function startPolling() {
         try {
             const resp = await fetch(`/api/status/${currentTaskId}`);
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || "状态查询失败");
+            if (!resp.ok) throw new Error(data.detail || "Status request failed");
 
-            updateProgressText(data.message || "处理中...");
-            updateInfoPanel(data);
+            updateProgressText(data.message || "Processing...");
             markStep(data.stage, data.status === "completed");
-            addLogEntry(data.message || data.stage || "状态更新");
+            updateInfoPanel(data);
+            addLogEntry(data.message || data.stage || "Status update");
 
             if (data.status === "completed") {
                 stopPolling();
                 setButtonLoading(false);
                 showResult(data.result, data.transcript, data.segments);
-                addLogEntry("任务完成。", "success");
-                showToast("处理完成");
+                addLogEntry("Task completed.", "success");
+                showToast("Completed");
             } else if (data.status === "failed") {
                 stopPolling();
                 setButtonLoading(false);
-                showError(data.message || "处理失败");
-                addLogEntry(data.message || "处理失败", "error");
+                showError(data.message || "Task failed.");
+                addLogEntry(data.message || "Task failed.", "error");
             }
         } catch (err) {
             stopPolling();
             setButtonLoading(false);
-            showError(err.message || "轮询失败");
-            addLogEntry(err.message || "轮询失败", "error");
+            const msg = err && err.message ? err.message : "Polling failed";
+            showError(msg);
+            addLogEntry(msg, "error");
         }
     }, 1200);
 }
@@ -239,6 +235,16 @@ function stopPolling() {
         clearInterval(pollTimer);
         pollTimer = null;
     }
+}
+
+function showResult(summary, transcript, segments) {
+    $("progressSection").style.display = "none";
+    $("resultSection").style.display = "block";
+    $("errorSection").style.display = "none";
+    currentSummary = summary || "";
+    currentTranscript = transcript || "";
+    currentSegments = Array.isArray(segments) ? segments : [];
+    renderSummary(currentSummary);
 }
 
 function escapeHtml(text) {
@@ -259,11 +265,12 @@ function renderSummary(text) {
     }
 
     if (currentFormat === "timeline" && currentSegments.length > 0) {
-        const lines = currentSegments.map((seg) => {
-            const t = formatTime(seg.start || 0);
-            return `<div style="margin:8px 0;"><span class="timestamp">[${t}]</span> ${escapeHtml(seg.text || "")}</div>`;
-        });
-        box.innerHTML = lines.join("");
+        box.innerHTML = currentSegments
+            .map((seg) => {
+                const t = formatTime(seg.start || 0);
+                return `<div style="margin:8px 0;"><span class="timestamp">[${t}]</span> ${escapeHtml(seg.text || "")}</div>`;
+            })
+            .join("");
         return;
     }
 
@@ -299,9 +306,8 @@ function switchFormat(format) {
 }
 
 function copyResult() {
-    const text = currentSummary || "";
-    if (!text) return showToast("暂无可复制内容");
-    navigator.clipboard.writeText(text).then(() => showToast("已复制"));
+    if (!currentSummary) return showToast("Nothing to copy");
+    navigator.clipboard.writeText(currentSummary).then(() => showToast("Copied"));
 }
 
 function formatTime(seconds) {
@@ -322,7 +328,9 @@ function formatSrtTime(seconds) {
 }
 
 function buildSrt(segments) {
-    if (!segments || segments.length === 0) return "1\n00:00:00,000 --> 00:00:02,000\n(无字幕)\n";
+    if (!segments || segments.length === 0) {
+        return "1\n00:00:00,000 --> 00:00:02,000\n(no subtitle)\n";
+    }
     return segments
         .map((seg, idx) => {
             const st = formatSrtTime(seg.start || 0);
@@ -334,12 +342,11 @@ function buildSrt(segments) {
 
 function downloadTranscript(type) {
     if (type === "srt") {
-        const srt = buildSrt(currentSegments);
-        downloadFile("subtitle.srt", srt, "text/plain");
+        downloadFile("subtitle.srt", buildSrt(currentSegments), "text/plain");
         return;
     }
     const txt = currentTranscript || currentSummary;
-    if (!txt) return showToast("暂无可下载内容");
+    if (!txt) return showToast("Nothing to download");
     downloadFile("transcript.txt", txt, "text/plain");
 }
 
@@ -369,22 +376,31 @@ function toggleTheme() {
     document.documentElement.setAttribute("data-theme", next);
     const icon = document.querySelector("#themeToggle i");
     if (icon) icon.className = next === "dark" ? "fas fa-moon" : "fas fa-sun";
-    if (mouseTrail) mouseTrail.setTheme(next);
+    if (meshEffect) meshEffect.setTheme(next);
 }
 
-class MouseTrail {
+class MouseMesh {
     constructor() {
-        this.canvas = $("mouseCanvas");
+        this.canvas = $("meshCanvas");
         this.ctx = this.canvas ? this.canvas.getContext("2d") : null;
-        this.particles = [];
         this.theme = document.documentElement.getAttribute("data-theme") || "dark";
-        this.mouse = { x: 0, y: 0, active: false };
-        this.frame = null;
+        this.points = [];
+        this.maxPoints = this.pickPointCount();
+        this.maxDistance = 130;
+        this.pointer = { x: 0, y: 0, active: false, vx: 0, vy: 0 };
 
         if (!this.canvas || !this.ctx) return;
         this.resize();
+        this.seedPoints();
         this.bind();
         this.animate();
+    }
+
+    pickPointCount() {
+        const w = window.innerWidth;
+        if (w < 700) return 36;
+        if (w < 1200) return 56;
+        return 76;
     }
 
     setTheme(theme) {
@@ -395,63 +411,130 @@ class MouseTrail {
         if (!this.canvas) return;
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
+        this.maxPoints = this.pickPointCount();
+        if (this.points.length > this.maxPoints) {
+            this.points.length = this.maxPoints;
+        } else {
+            while (this.points.length < this.maxPoints) {
+                this.points.push(this.makePoint());
+            }
+        }
+    }
+
+    makePoint() {
+        return {
+            x: Math.random() * this.canvas.width,
+            y: Math.random() * this.canvas.height,
+            vx: (Math.random() - 0.5) * 0.35,
+            vy: (Math.random() - 0.5) * 0.35,
+            radius: 1 + Math.random() * 1.4,
+        };
+    }
+
+    seedPoints() {
+        this.points = [];
+        for (let i = 0; i < this.maxPoints; i++) {
+            this.points.push(this.makePoint());
+        }
     }
 
     bind() {
         window.addEventListener("resize", () => this.resize());
         window.addEventListener("mousemove", (e) => {
-            this.mouse.x = e.clientX;
-            this.mouse.y = e.clientY;
-            this.mouse.active = true;
-            this.spawn(e.clientX, e.clientY);
+            this.pointer.vx = e.clientX - this.pointer.x;
+            this.pointer.vy = e.clientY - this.pointer.y;
+            this.pointer.x = e.clientX;
+            this.pointer.y = e.clientY;
+            this.pointer.active = true;
         });
         window.addEventListener("mouseleave", () => {
-            this.mouse.active = false;
+            this.pointer.active = false;
         });
     }
 
-    spawn(x, y) {
-        for (let i = 0; i < 2; i++) {
-            this.particles.push({
-                x,
-                y,
-                vx: (Math.random() - 0.5) * 1.4,
-                vy: (Math.random() - 0.5) * 1.4,
-                life: 1,
-                size: 1.2 + Math.random() * 2.2,
-            });
+    updatePoints() {
+        for (const p of this.points) {
+            p.x += p.vx;
+            p.y += p.vy;
+
+            if (p.x <= 0 || p.x >= this.canvas.width) p.vx *= -1;
+            if (p.y <= 0 || p.y >= this.canvas.height) p.vy *= -1;
+
+            p.x = Math.max(0, Math.min(this.canvas.width, p.x));
+            p.y = Math.max(0, Math.min(this.canvas.height, p.y));
+
+            if (this.pointer.active) {
+                const dx = this.pointer.x - p.x;
+                const dy = this.pointer.y - p.y;
+                const d = Math.hypot(dx, dy);
+                if (d > 1 && d < 180) {
+                    const k = (1 - d / 180) * 0.02;
+                    p.vx += (dx / d) * k;
+                    p.vy += (dy / d) * k;
+                }
+            }
+
+            p.vx *= 0.992;
+            p.vy *= 0.992;
+            p.vx = Math.max(-0.9, Math.min(0.9, p.vx));
+            p.vy = Math.max(-0.9, Math.min(0.9, p.vy));
+        }
+    }
+
+    draw() {
+        const ctx = this.ctx;
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        const rgb = this.theme === "light" ? "66, 101, 138" : "216, 228, 240";
+
+        for (let i = 0; i < this.points.length; i++) {
+            const a = this.points[i];
+            for (let j = i + 1; j < this.points.length; j++) {
+                const b = this.points[j];
+                const d = Math.hypot(a.x - b.x, a.y - b.y);
+                if (d > this.maxDistance) continue;
+                const alpha = (1 - d / this.maxDistance) * 0.36;
+                ctx.strokeStyle = `rgba(${rgb}, ${alpha.toFixed(3)})`;
+                ctx.lineWidth = 0.8;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+            }
+        }
+
+        if (this.pointer.active) {
+            for (const p of this.points) {
+                const d = Math.hypot(p.x - this.pointer.x, p.y - this.pointer.y);
+                if (d > 160) continue;
+                const alpha = (1 - d / 160) * 0.52;
+                ctx.strokeStyle = `rgba(${rgb}, ${alpha.toFixed(3)})`;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(this.pointer.x, this.pointer.y);
+                ctx.stroke();
+            }
+        }
+
+        ctx.fillStyle = this.theme === "light" ? "rgba(66,101,138,0.65)" : "rgba(216,228,240,0.6)";
+        for (const p of this.points) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fill();
         }
     }
 
     animate() {
-        if (!this.canvas || !this.ctx) return;
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-        for (let i = this.particles.length - 1; i >= 0; i--) {
-            const p = this.particles[i];
-            p.x += p.vx;
-            p.y += p.vy;
-            p.life -= 0.025;
-            if (p.life <= 0) {
-                this.particles.splice(i, 1);
-                continue;
-            }
-            const color =
-                this.theme === "light"
-                    ? `rgba(66, 101, 138, ${p.life.toFixed(3)})`
-                    : `rgba(216, 228, 240, ${p.life.toFixed(3)})`;
-            this.ctx.fillStyle = color;
-            this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            this.ctx.fill();
-        }
-        this.frame = requestAnimationFrame(() => this.animate());
+        this.updatePoints();
+        this.draw();
+        requestAnimationFrame(() => this.animate());
     }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     initTheme();
-    mouseTrail = new MouseTrail();
+    meshEffect = new MouseMesh();
 
     const themeBtn = $("themeToggle");
     if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
@@ -478,7 +561,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const url = (input.value || "").trim();
                 if (!url) return;
                 if (/bilibili\.com|b23\.tv|xiaohongshu\.com|xhslink\.com/i.test(url)) {
-                    showToast("检测到视频链接，自动开始总结");
+                    showToast("Detected video URL, auto start...");
                     startSummarize();
                 }
             }, 120);
