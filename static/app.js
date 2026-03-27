@@ -387,7 +387,17 @@ class MouseMesh {
         this.points = [];
         this.maxPoints = this.pickPointCount();
         this.maxDistance = 130;
-        this.pointer = { x: 0, y: 0, active: false, vx: 0, vy: 0 };
+        this.pointer = {
+            x: 0,
+            y: 0,
+            vx: 0,
+            vy: 0,
+            speed: 0,
+            active: false,
+            lastMoveAt: 0,
+        };
+        this.lastSpawnAt = 0;
+        this.spawnIntervalMs = 900;
 
         if (!this.canvas || !this.ctx) return;
         this.resize();
@@ -428,6 +438,9 @@ class MouseMesh {
             vx: (Math.random() - 0.5) * 0.35,
             vy: (Math.random() - 0.5) * 0.35,
             radius: 1 + Math.random() * 1.4,
+            stick: 0,
+            life: 0,
+            ttl: 360 + Math.floor(Math.random() * 420),
         };
     }
 
@@ -445,15 +458,52 @@ class MouseMesh {
             this.pointer.vy = e.clientY - this.pointer.y;
             this.pointer.x = e.clientX;
             this.pointer.y = e.clientY;
+            this.pointer.speed = Math.hypot(this.pointer.vx, this.pointer.vy);
             this.pointer.active = true;
+            this.pointer.lastMoveAt = performance.now();
         });
         window.addEventListener("mouseleave", () => {
             this.pointer.active = false;
         });
     }
 
+    recyclePoint(idx) {
+        this.points[idx] = this.makePoint();
+    }
+
+    maybeSpawnNewPoints() {
+        const now = performance.now();
+        if (now - this.lastSpawnAt < this.spawnIntervalMs) return;
+        this.lastSpawnAt = now;
+        this.spawnIntervalMs = 700 + Math.random() * 1200;
+
+        const refreshCount = 1 + (Math.random() > 0.84 ? 1 : 0);
+        for (let i = 0; i < refreshCount; i++) {
+            if (this.points.length === 0) return;
+            const idx = Math.floor(Math.random() * this.points.length);
+            this.recyclePoint(idx);
+        }
+    }
+
     updatePoints() {
+        const now = performance.now();
+        if (now - this.pointer.lastMoveAt > 120) {
+            this.pointer.speed *= 0.8;
+            this.pointer.vx *= 0.82;
+            this.pointer.vy *= 0.82;
+        }
+
+        const slowFactor = Math.max(0, Math.min(1, 1 - this.pointer.speed / 16));
+        const fastFactor = Math.max(0, Math.min(1, (this.pointer.speed - 14) / 20));
+
+        this.maybeSpawnNewPoints();
+
         for (const p of this.points) {
+            p.life += 1;
+            if (p.life > p.ttl) {
+                Object.assign(p, this.makePoint());
+            }
+
             p.x += p.vx;
             p.y += p.vy;
 
@@ -467,17 +517,37 @@ class MouseMesh {
                 const dx = this.pointer.x - p.x;
                 const dy = this.pointer.y - p.y;
                 const d = Math.hypot(dx, dy);
-                if (d > 1 && d < 180) {
-                    const k = (1 - d / 180) * 0.02;
-                    p.vx += (dx / d) * k;
-                    p.vy += (dy / d) * k;
+                const influenceRadius = 210;
+                if (d > 1 && d < influenceRadius) {
+                    const nx = dx / d;
+                    const ny = dy / d;
+                    const influence = 1 - d / influenceRadius;
+
+                    // Slow cursor: keep points attached around cursor.
+                    if (slowFactor > 0) {
+                        const attract = influence * (0.012 + 0.08 * slowFactor + 0.05 * p.stick);
+                        p.vx += nx * attract + this.pointer.vx * 0.003 * influence;
+                        p.vy += ny * attract + this.pointer.vy * 0.003 * influence;
+                        p.stick = Math.min(1, p.stick + 0.04 * influence * slowFactor);
+                    }
+
+                    // Fast cursor: tear mesh away from cursor.
+                    if (fastFactor > 0) {
+                        const tear = influence * (0.035 + 0.18 * fastFactor);
+                        p.vx -= nx * tear;
+                        p.vy -= ny * tear;
+                        p.stick = Math.max(0, p.stick - 0.14 * fastFactor);
+                    }
                 }
+            } else {
+                p.stick = Math.max(0, p.stick - 0.02);
             }
 
-            p.vx *= 0.992;
-            p.vy *= 0.992;
-            p.vx = Math.max(-0.9, Math.min(0.9, p.vx));
-            p.vy = Math.max(-0.9, Math.min(0.9, p.vy));
+            const damping = fastFactor > 0.4 ? 0.972 : 0.988;
+            p.vx *= damping;
+            p.vy *= damping;
+            p.vx = Math.max(-1.8, Math.min(1.8, p.vx));
+            p.vy = Math.max(-1.8, Math.min(1.8, p.vy));
         }
     }
 
@@ -504,12 +574,15 @@ class MouseMesh {
         }
 
         if (this.pointer.active) {
+            const fastFactor = Math.max(0, Math.min(1, (this.pointer.speed - 14) / 20));
             for (const p of this.points) {
                 const d = Math.hypot(p.x - this.pointer.x, p.y - this.pointer.y);
-                if (d > 160) continue;
-                const alpha = (1 - d / 160) * 0.52;
+                if (d > 190) continue;
+                const stickBoost = p.stick * 0.35;
+                const alphaBase = (1 - d / 190) * (0.32 + stickBoost);
+                const alpha = Math.max(0.04, alphaBase * (1 - fastFactor * 0.6));
                 ctx.strokeStyle = `rgba(${rgb}, ${alpha.toFixed(3)})`;
-                ctx.lineWidth = 1;
+                ctx.lineWidth = 0.85 + p.stick * 0.6;
                 ctx.beginPath();
                 ctx.moveTo(p.x, p.y);
                 ctx.lineTo(this.pointer.x, this.pointer.y);
